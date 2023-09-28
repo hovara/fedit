@@ -41,6 +41,7 @@ typedef struct erow{
 
 struct editorConfig{
 	int cx, cy;
+	int rowoff;
 	int screenrows;
 	int screencols;
 	int numrows;
@@ -219,9 +220,16 @@ void abFree(struct abuf *ab){
 
 /*** output ***/
 
+void editorScroll(){
+	if(cfg.cy < cfg.rowoff) cfg.rowoff = cfg.cy;
+	if(cfg.cy >= cfg.rowoff + cfg.screenrows) 
+		cfg.rowoff = cfg.cy - cfg.screenrows + 1;
+}
+
 void editorDrawRows(struct abuf *ab){
 	for(int y = 0; y < cfg.screenrows; y++){
-		if(y >= cfg.numrows){
+		int filerow = y + cfg.rowoff;
+		if(filerow >= cfg.numrows){
 			if(cfg.numrows == 0 && y == cfg.screenrows / 3){
 				char welcome[80];
 				int welcome_len = snprintf(welcome, sizeof(welcome), 
@@ -235,9 +243,9 @@ void editorDrawRows(struct abuf *ab){
 			else abAppend(ab, "~", 1);
 		}
 		else{
-			int len = cfg.row[y].size;
+			int len = cfg.row[filerow].size;
 			if(len > cfg.screencols) len = cfg.screencols;
-			abAppend(ab, cfg.row[y].chars, len);
+			abAppend(ab, cfg.row[filerow].chars, len);
 		}
 
 		abAppend(ab, "\x1b[K", 3);
@@ -247,6 +255,8 @@ void editorDrawRows(struct abuf *ab){
 }
 
 void editorRefreshScreen(){
+	editorScroll();
+
 	struct abuf ab = ABUF_INIT;
 
 	abAppend(&ab, "\x1b[?25l", 6);
@@ -255,7 +265,7 @@ void editorRefreshScreen(){
 	editorDrawRows(&ab);
 
 	char buf[32];
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cfg.cy + 1, cfg.cx +1);
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (cfg.cy - cfg.rowoff) + 1, cfg.cx +1);
 	abAppend(&ab, buf, strlen(buf));
 
 	abAppend(&ab, "\x1b[?25h", 6);
@@ -279,7 +289,7 @@ void editorMoveCursor(int key)
 			if(cfg.cy != 0) cfg.cy--;
 			break;
 		case ARROW_DOWN:
-			if(cfg.cy != cfg.screenrows - 1) cfg.cy++;
+			if(cfg.cy < cfg.numrows) cfg.cy++;
 			break;
 	}
 }
@@ -323,6 +333,7 @@ void editorProcessKeypress(){
 void initEditor(){
 	cfg.cx = 0;
 	cfg.cy = 0;
+	cfg.rowoff = 0;
 	cfg.numrows = 0;
 	cfg.row = NULL;
 
