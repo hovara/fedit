@@ -1,5 +1,9 @@
 /*** includes ***/
 
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -40,7 +44,7 @@ struct editorConfig{
 	int screenrows;
 	int screencols;
 	int numrows;
-	erow row;
+	erow *row;
 	struct termios orig_termios;
 };
 
@@ -159,17 +163,36 @@ int getWindowSize(int *rows, int *cols){
 	}
 }
 
+/*** row operations ***/
+
+void editorAppendRow(char *s, size_t len){
+	cfg.row = realloc(cfg.row, sizeof(erow) * (cfg.numrows + 1));
+
+	int at = cfg.numrows;
+	cfg.row[at].size = len;
+	cfg.row[at].chars = malloc(len + 1);
+	memcpy(cfg.row[at].chars, s, len);
+	cfg.row[at].chars[len] = '\0';
+	cfg.numrows++;
+}
+
 /*** file i/o ***/
 
-void editorOpen(){
-	char *line = "Hello, world!";
-	ssize_t linelen = 13;
+void editorOpen(char *filename){
+	FILE *fp = fopen(filename, "r");
+	if(!fp) die("editorOpen/fopen");
 
-	cfg.row.size = linelen;
-	cfg.row.chars = malloc(linelen + 1);
-	memcpy(cfg.row.chars, line, linelen);
-	cfg.row.chars[linelen] = '\0';
-	cfg.numrows = 1;
+	char *line = NULL;
+	size_t linecap = 0;
+	ssize_t linelen;
+	while((linelen = getline(&line, &linecap, fp)) != -1){
+		while(linelen > 0 && (line[linelen - 1] == '\n' || 
+							  line[linelen - 1] == '\r'))
+			linelen--;
+		editorAppendRow(line, linelen);
+	}
+	free(line);
+	fclose(fp);
 }
 
 /*** append buffer ***/
@@ -199,7 +222,7 @@ void abFree(struct abuf *ab){
 void editorDrawRows(struct abuf *ab){
 	for(int y = 0; y < cfg.screenrows; y++){
 		if(y >= cfg.numrows){
-			if(y == cfg.screenrows / 3){
+			if(cfg.numrows == 0 && y == cfg.screenrows / 3){
 				char welcome[80];
 				int welcome_len = snprintf(welcome, sizeof(welcome), 
 					"FEDIT --version %s", FEDIT_VERSION);
@@ -212,13 +235,12 @@ void editorDrawRows(struct abuf *ab){
 			else abAppend(ab, "~", 1);
 		}
 		else{
-			int len = cfg.row.size;
+			int len = cfg.row[y].size;
 			if(len > cfg.screencols) len = cfg.screencols;
-			abAppend(ab, cfg.row.chars, len);
+			abAppend(ab, cfg.row[y].chars, len);
 		}
 
 		abAppend(ab, "\x1b[K", 3);
-
 		if(y < cfg.screenrows - 1)
 			abAppend(ab, "\r\n", 2);
 	}
@@ -302,15 +324,18 @@ void initEditor(){
 	cfg.cx = 0;
 	cfg.cy = 0;
 	cfg.numrows = 0;
+	cfg.row = NULL;
 
 	if(getWindowSize(&cfg.screenrows, &cfg.screencols) == -1)
 		die("initEditor/getWindowSize");
 }
 
-int main(){
+int main(int argc, char *argv[]){
 	enableRawMode();
 	initEditor();
-	editorOpen();
+	if(argc >= 2){
+		editorOpen(argv[1]);
+	}
 	
 	while (1){
 		editorRefreshScreen();
